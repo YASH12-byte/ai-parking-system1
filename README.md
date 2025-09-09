@@ -24,9 +24,13 @@ Open `http://localhost:8000`.
 ## Notes
 - Detection uses simple edge-density per-slot heuristic as a placeholder.
 - `src/fuzzy.py` implements a soft-computing score for slot prioritization.
-- `src/crypto_utils.py` provides JWT and AES-GCM helpers.git add README.md
-git commit -m "Add project README"
-git push
-
+- `src/crypto_utils.py` provides JWT and AES-GCM helpers.
 - Configure secrets in environment variables: `SECRET_KEY`.
 
+## Features
+- Real-time camera detection with webcam support
+- Multi-camera dashboard
+- Smart slot assignment with fuzzy logic
+- User authentication with JWT
+- Secure password hashing
+- CORS enabled for cross-origin requests
