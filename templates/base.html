@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>AI Parking</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {% block extra_head %}{% endblock %}
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🅿️</text></svg>">
+    <meta name="theme-color" content="#0b1021" />
+</head>
+<body>
+    <div class="container">
+        <nav class="nav">
+            <div class="brand"><a href="/" class="brand-link">AI Parking</a></div>
+            <div class="links">
+                <a href="/">Home</a>
+                <a href="/login" id="navLogin">Login</a>
+                <a href="/signup" id="navSignup">Create Account</a>
+                <a href="#" id="navLogout" style="display:none">Logout</a>
+            </div>
+        </nav>
+        {% block content %}{% endblock %}
+        <footer class="footer">© <span id="year"></span> AI Parking</footer>
+    </div>
+    <script>
+        // Simple auth state handling using localStorage
+        const token = localStorage.getItem('token');
+        if(token){
+            const l = document.getElementById('navLogout');
+            if(l){ l.style.display = 'inline'; l.addEventListener('click', ()=>{ localStorage.removeItem('token'); location.href='/'; }); }
+            const login = document.getElementById('navLogin'); if(login){ login.style.display='none'; }
+            const signup = document.getElementById('navSignup'); if(signup){ signup.style.display='none'; }
+        }
+    </script>
+    {% block extra_scripts %}{% endblock %}
+    <script>
+        // Footer year
+        (function(){ var y=document.getElementById('year'); if(y){ y.textContent = new Date().getFullYear(); } })();
+    </script>
+</body>
+</html>
+
+

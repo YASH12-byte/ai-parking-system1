@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>AI Parking</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🅿️</text></svg>">
+    <meta name="theme-color" content="#0b1021" />
+</head>
+<body>
+    <div class="container">
+        <nav class="nav">
+            <div class="brand"><a href="/" class="brand-link">AI Parking</a></div>
+            <div class="links">
+                <a href="#webcam">Webcam</a>
+                <a href="#about">About</a>
+                <button type="button" id="navLogin" onclick="openLogin()">Login</button>
+                <button type="button" id="navSignup" onclick="openSignup()">Create Account</button>
+                <a href="#" id="navLogout" style="display:none">Logout</a>
+            </div>
+        </nav>
+        <section class="hero">
+            <div class="hero-text">
+                <h1>Smart AI Parking</h1>
+                <p>Real‑time slot detection, smart assignment, and secure access.</p>
+                <div>
+                    <a class="btn" href="#webcam">Explore detection</a>
+                </div>
+            </div>
+        </section>
+        
+        <section class="features grid">
+            <div class="card"><h3>AI Detection</h3><p>Edge‑based slot occupancy estimation.</p></div>
+            <div class="card"><h3>Smart Scoring</h3><p>Soft‑computing score for best slot choice.</p></div>
+            <div class="card"><h3>Secure</h3><p>JWT auth and AES‑GCM utilities.</p></div>
+        </section>
+        <div id="modalBackdrop" class="modal-backdrop" style="display:none" onclick="closeModals()"></div>
+        <div id="signupModal" class="modal" style="display:none">
+            <div class="modal-content card" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h2>Create Account</h2>
+                    <button class="close" onclick="closeModals()">×</button>
+                </div>
+                <form id="signupForm" method="post" action="auth/signup" onsubmit="return submitSignup(event)">
+                    <div class="form-group">
+                        <label for="signup_username">Username</label>
+                        <input id="signup_username" name="username" type="text" required minlength="3" maxlength="50" 
+                               placeholder="Enter username" autocomplete="username" />
+                        <small class="form-help">3-50 characters, letters and numbers only</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="signup_email">Email</label>
+                        <input id="signup_email" name="email" type="email" required maxlength="100"
+                               placeholder="Enter email address" autocomplete="email" />
+                        <small class="form-help">We'll use this for account recovery</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="signup_password">Password</label>
+                        <div class="password-input-wrapper">
+                            <input id="signup_password" name="password" type="password" required minlength="6" maxlength="100"
+                                   placeholder="Enter password" autocomplete="new-password" />
+                            <button type="button" class="password-toggle" onclick="togglePassword('signup_password')">
+                                <span id="signup_password_icon">👁️</span>
+                            </button>
+                        </div>
+                        <small class="form-help">At least 6 characters</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="signup_confirm">Confirm Password</label>
+                        <div class="password-input-wrapper">
+                            <input id="signup_confirm" name="confirm_password" type="password" required minlength="6" maxlength="100"
+                                   placeholder="Confirm password" autocomplete="new-password" />
+                            <button type="button" class="password-toggle" onclick="togglePassword('signup_confirm')">
+                                <span id="signup_confirm_icon">👁️</span>
+                            </button>
+                        </div>
+                        <small class="form-help">Must match the password above</small>
+                    </div>
+                    
+                    <button type="submit" id="signupBtn" class="btn-primary">
+                        <span id="signupBtnText">Create Account</span>
+                        <span id="signupSpinner" style="display:none">Creating...</span>
+                    </button>
+                </form>
+                
+                <div id="signupMsg" class="success-message" style="display:none">
+                    <strong>Success!</strong> Account created successfully. You can now login.
+                </div>
+                <div id="signupErr" class="error-message" style="display:none"></div>
+            </div>
+        </div>
+        <div id="loginModal" class="modal" style="display:none">
+            <div class="modal-content card" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h2>Login</h2>
+                    <button class="close" onclick="closeModals()">×</button>
+                </div>
+                <form method="post" action="auth/login" onsubmit="return submitLogin(event)">
+                    <div class="form-group">
+                        <label for="login_username">Username</label>
+                        <input id="login_username" name="username" type="text" required 
+                               placeholder="Enter username" autocomplete="username" />
+                    </div>
+                    <div class="form-group">
+                        <label for="login_password">Password</label>
+                        <div class="password-input-wrapper">
+                            <input id="login_password" name="password" type="password" required 
+                                   placeholder="Enter password" autocomplete="current-password" />
+                            <button type="button" class="password-toggle" onclick="togglePassword('login_password')">
+                                <span id="login_password_icon">👁️</span>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary">Login</button>
+                </form>
+                <pre id="loginOut"></pre>
+                <details class="card" style="margin-top:8px;">
+                    <summary>Reset password</summary>
+                    <form method="post" action="auth/reset" onsubmit="return submitReset(event)">
+                        <div class="form-group">
+                            <label for="reset_username">Username</label>
+                            <input id="reset_username" name="username" type="text" required 
+                                   placeholder="Enter username" />
+                        </div>
+                        <div class="form-group">
+                            <label for="reset_email">Email</label>
+                            <input id="reset_email" name="email" type="email" required 
+                                   placeholder="Enter email" />
+                        </div>
+                        <div class="form-group">
+                            <label for="reset_password">New Password</label>
+                            <div class="password-input-wrapper">
+                                <input id="reset_password" name="new_password" type="password" required 
+                                       placeholder="Enter new password" />
+                                <button type="button" class="password-toggle" onclick="togglePassword('reset_password')">
+                                    <span id="reset_password_icon">👁️</span>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-primary">Reset Password</button>
+                    </form>
+                    <p id="resetMsg" class="muted" style="display:none">Password updated. Please login.</p>
+                </details>
+            </div>
+        </div>
+        <section id="about" class="about grid">
+            <div class="card">
+                <h3>About AI Parking</h3>
+                <p>AI Parking uses computer vision to understand which parking slots are occupied or free. With soft‑computing, it recommends the most suitable slot based on distance, vehicle size, and user priority.</p>
+            </div>
+            <div class="card">
+                <h3>Camera Integration</h3>
+                <p>Use your device’s camera for real‑time detection or upload images. Define slot regions with simple polygons in JSON for quick calibration.</p>
+            </div>
+            <div class="card">
+                <h3>Occupancy Detection</h3>
+                <p>A lightweight edge‑density heuristic estimates occupancy per slot. It’s fast and works without heavy models; you can later upgrade to advanced models.</p>
+            </div>
+            <div class="card">
+                <h3>Security</h3>
+                <p>Passwords are hashed; tokens use JWT; optional AES‑GCM helpers let you encrypt sensitive data. Keep <code>SECRET_KEY</code> safe in production.</p>
+            </div>
+        </section>
+        <section>
+            <h2>1. Get Token</h2>
+            <input id="userId" placeholder="user id" />
+            <button onclick="getToken()">Get Token</button>
+            <div id="token"></div>
+        </section>
+        <section id="webcam">
+            <h2>Detect via Webcam</h2>
+            <div class="grid">
+                <div class="cam-wrap">
+                    <video id="cam" autoplay playsinline width="480" height="360" style="background:#000"></video>
+                    <canvas id="overlay" width="480" height="360"></canvas>
+                </div>
+                <canvas id="snap" width="480" height="360" style="display:none"></canvas>
+            </div>
+            <div class="controls">
+                <label>Camera <select id="deviceSelect" onchange="switchCam()"></select></label>
+                <label>Resolution
+                    <select id="resSelect" onchange="applyResolution()">
+                        <option value="default">Default</option>
+                        <option value="640x480">640x480</option>
+                        <option value="1280x720">1280x720</option>
+                        <option value="1920x1080">1920x1080</option>
+                    </select>
+                </label>
+                <button onclick="startCam()">Start</button>
+                <button onclick="stopCam()">Stop</button>
+                <button onclick="togglePause()" id="pauseBtn">Pause</button>
+                <button onclick="detectFromCam()">Detect</button>
+                <button onclick="toggleAuto()" id="autoBtn">Auto Detect: Off</button>
+                <label>Interval(ms) <input id="autoMs" type="number" value="1200" min="200" step="100" style="width:90px"></label>
+                <button onclick="snapshot()">Snapshot</button>
+                <button onclick="toggleTorch()" id="torchBtn">Torch</button>
+                <span id="fps" class="muted">FPS: -</span>
+            </div>
+            <div>
+                <label>Slots JSON
+                    <textarea id="slotsJson" rows="4" style="width:100%">[{"id":"A1","polygon":[[50,50],[200,50],[200,150],[50,150]]}]</textarea>
+                </label>
+            </div>
+            <pre id="detectCamOut"></pre>
+        </section>
+
+        <section id="multiCam">
+            <h2>Multi‑camera Dashboard</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>Main Camera</h3>
+                    <div class="cam-wrap">
+                        <video id="main_cam" autoplay playsinline width="480" height="360" style="background:#000"></video>
+                        <canvas id="main_overlay" width="480" height="360"></canvas>
+                    </div>
+                    <canvas id="main_snap" width="480" height="360" style="display:none"></canvas>
+                    <div class="controls">
+                        <label>Device <select id="main_device" onchange="switchCamFor('main')"></select></label>
+                        <button onclick="startCamFor('main')">Start</button>
+                        <button onclick="stopCamFor('main')">Stop</button>
+                        <button onclick="detectFromCamFor('main')">Detect</button>
+                        <button onclick="toggleAutoFor('main')" id="main_auto">Auto Detect: Off</button>
+                    </div>
+                    <pre id="main_out" class="muted"></pre>
+                </div>
+                <div class="card">
+                    <h3>Front Gate</h3>
+                    <div class="cam-wrap">
+                        <video id="front_cam" autoplay playsinline width="480" height="360" style="background:#000"></video>
+                        <canvas id="front_overlay" width="480" height="360"></canvas>
+                    </div>
+                    <canvas id="front_snap" width="480" height="360" style="display:none"></canvas>
+                    <div class="controls">
+                        <label>Device <select id="front_device" onchange="switchCamFor('front')"></select></label>
+                        <button onclick="startCamFor('front')">Start</button>
+                        <button onclick="stopCamFor('front')">Stop</button>
+                        <button onclick="detectFromCamFor('front')">Detect</button>
+                        <button onclick="toggleAutoFor('front')" id="front_auto">Auto Detect: Off</button>
+                    </div>
+                    <pre id="front_out" class="muted"></pre>
+                </div>
+                <div class="card">
+                    <h3>Back Gate</h3>
+                    <div class="cam-wrap">
+                        <video id="back_cam" autoplay playsinline width="480" height="360" style="background:#000"></video>
+                        <canvas id="back_overlay" width="480" height="360"></canvas>
+                    </div>
+                    <canvas id="back_snap" width="480" height="360" style="display:none"></canvas>
+                    <div class="controls">
+                        <label>Device <select id="back_device" onchange="switchCamFor('back')"></select></label>
+                        <button onclick="startCamFor('back')">Start</button>
+                        <button onclick="stopCamFor('back')">Stop</button>
+                        <button onclick="detectFromCamFor('back')">Detect</button>
+                        <button onclick="toggleAutoFor('back')" id="back_auto">Auto Detect: Off</button>
+                    </div>
+                    <pre id="back_out" class="muted"></pre>
+                </div>
+            </div>
+            <div class="card" style="margin-top:12px;">
+                <h3>External/IP Camera</h3>
+                <p class="muted">Provide an image snapshot URL (HTTP/HTTPS) from a mobile phone camera app or building IP camera.</p>
+                <label>Snapshot URL <input id="ipUrl" placeholder="https://host/snapshot.jpg" style="width:60%" /></label>
+                <button onclick="detectFromUrl()">Fetch & Detect</button>
+                <pre id="ipOut" class="muted"></pre>
+            </div>
+            <div class="card" style="margin-top:12px;">
+                <h3>RTSP Presets</h3>
+                <p class="muted">Use a preset RTSP URL (replace user:pass@host as needed) and detect a single frame.</p>
+                <div class="controls">
+                    <select id="rtspPreset">
+                        <option value="rtsp://user:pass@192.168.1.10:554/Streaming/Channels/101">Hikvision Main</option>
+                        <option value="rtsp://user:pass@192.168.1.11:554/Streaming/Channels/102">Hikvision Sub</option>
+                        <option value="rtsp://user:pass@192.168.1.12:554/track1">Dahua Main</option>
+                        <option value="rtsp://user:pass@192.168.1.13:554/live">Generic RTSP</option>
+                    </select>
+                    <button onclick="detectFromRtsp()">Connect & Detect</button>
+                </div>
+                <pre id="rtspOut" class="muted"></pre>
+            </div>
+        </section>
+        <section id="assignSlot">
+            <h2>🎯 Smart Slot Assignment</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>Vehicle Information</h3>
+                    <div class="form-group">
+                        <label for="vehicleType">Vehicle Type</label>
+                        <select id="vehicleType" onchange="updateVehicleSize()">
+                            <option value="motorcycle">🏍️ Motorcycle (0.5)</option>
+                            <option value="car" selected>🚗 Car (1.0)</option>
+                            <option value="suv">🚙 SUV (1.5)</option>
+                            <option value="truck">🚛 Truck (2.0)</option>
+                            <option value="bus">🚌 Bus (2.5)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="vehicleSize">Vehicle Size Factor</label>
+                        <input id="vehicleSize" type="number" value="1.0" step="0.1" min="0.1" max="3.0" 
+                               onchange="updateVehicleType()" />
+                        <small class="form-help">Higher values for larger vehicles</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="licensePlate">License Plate (Optional)</label>
+                        <input id="licensePlate" type="text" placeholder="ABC-1234" maxlength="10" />
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>Assignment Preferences</h3>
+                    <div class="form-group">
+                        <label for="distanceToGate">Distance to Gate (meters)</label>
+                        <input id="distanceToGate" type="number" value="10" step="1" min="1" max="100" />
+                        <small class="form-help">Closer slots get higher priority</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="userPriority">User Priority Level</label>
+                        <select id="userPriority">
+                            <option value="0.2">🥉 Standard (0.2)</option>
+                            <option value="0.5" selected>🥈 Premium (0.5)</option>
+                            <option value="0.8">🥇 VIP (0.8)</option>
+                            <option value="1.0">👑 VIP+ (1.0)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="preferredZone">Preferred Zone</label>
+                        <select id="preferredZone">
+                            <option value="any">Any Zone</option>
+                            <option value="A">Zone A (Near Entrance)</option>
+                            <option value="B">Zone B (Middle)</option>
+                            <option value="C">Zone C (Far End)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>Available Slots</h3>
+                    <div class="form-group">
+                        <label for="availableSlots">Slot List</label>
+                        <textarea id="availableSlots" rows="4" placeholder="A1,A2,A3,B1,B2,C1,C2">A1,A2,A3,B1,B2,C1,C2</textarea>
+                        <small class="form-help">Comma-separated list of available slots</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="slotStatus">Current Slot Status</label>
+                        <div id="slotStatus" class="slot-status-grid"></div>
+                        <button type="button" onclick="refreshSlotStatus()" class="btn-secondary">Refresh Status</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top: 16px;">
+                <h3>Assignment Results</h3>
+                <button onclick="assignSlot()" class="btn-primary" id="assignBtn">
+                    <span id="assignBtnText">🎯 Find Best Slot</span>
+                    <span id="assignSpinner" style="display:none">Finding...</span>
+                </button>
+                <div id="assignResult" class="assignment-result" style="display:none"></div>
+                <div id="assignError" class="error-message" style="display:none"></div>
+            </div>
+            
+            <div class="card" style="margin-top: 16px;">
+                <h3>Assignment History</h3>
+                <div id="assignmentHistory" class="history-list">
+                    <p class="muted">No assignments yet. Create your first assignment above!</p>
+                </div>
+                <button onclick="clearHistory()" class="btn-secondary" style="margin-top: 8px;">Clear History</button>
+            </div>
+        </section>
+    <script>
+        // Auth state for nav
+        (function(){
+            const token = localStorage.getItem('token');
+            if(token){
+                const l = document.getElementById('navLogout');
+                if(l){ l.style.display = 'inline'; l.addEventListener('click', ()=>{ localStorage.removeItem('token'); location.href='/'; }); }
+                const login = document.getElementById('navLogin'); if(login){ login.style.display='none'; }
+                const signup = document.getElementById('navSignup'); if(signup){ signup.style.display='none'; }
+            }
+            // Open modals if anchors are used
+            if(location.hash === '#signup'){ openSignup(); }
+            if(location.hash === '#login'){ openLogin(); }
+        })();
+
+        // Login handler (single-page)
+        const api = (path) => new URL(path, window.location.origin).toString();
+        // Login handler (single-page)
+        async function submitLogin(e){
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const body = new URLSearchParams();
+            for (const [k, v] of formData.entries()) { body.append(k, String(v)); }
+            const res = await fetch(api('/auth/login'), { method: 'POST', headers: { 'Accept':'application/json', 'Content-Type':'application/x-www-form-urlencoded' }, body });
+            const data = await res.json();
+            document.getElementById('loginOut').textContent = JSON.stringify(data, null, 2);
+            if(data.token){ localStorage.setItem('token', data.token); location.hash = ''; closeModals(); }
+        }
+        async function submitReset(e){
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const body = new URLSearchParams();
+            for (const [k, v] of formData.entries()) { body.append(k, String(v)); }
+            const res = await fetch(api('/auth/reset'), { method: 'POST', headers: { 'Accept':'application/json', 'Content-Type':'application/x-www-form-urlencoded' }, body });
+            const data = await res.json();
+            if(data && data.ok){ const r=document.getElementById('resetMsg'); if(r){ r.style.display='block'; } }
+            return false;
+        }
+        async function submitSignup(e){
+            e.preventDefault();
+            
+            // Get form elements
+            const form = e.target;
+            const formData = new FormData(form);
+            const errEl = document.getElementById('signupErr');
+            const msgEl = document.getElementById('signupMsg');
+            const btnEl = document.getElementById('signupBtn');
+            const btnText = document.getElementById('signupBtnText');
+            const spinner = document.getElementById('signupSpinner');
+            
+            // Clear previous messages
+            if(errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+            if(msgEl) { msgEl.style.display = 'none'; }
+            
+            // Client-side validation
+            const username = formData.get('username')?.toString().trim();
+            const email = formData.get('email')?.toString().trim();
+            const password = formData.get('password')?.toString();
+            const confirmPassword = formData.get('confirm_password')?.toString();
+            
+            // Validate username
+            if (!username || username.length < 3) {
+                showError('Username must be at least 3 characters long');
+                return false;
+            }
+            
+            // Validate email
+            if (!email || !email.includes('@')) {
+                showError('Please enter a valid email address');
+                return false;
+            }
+            
+            // Validate password
+            if (!password || password.length < 6) {
+                showError('Password must be at least 6 characters long');
+                return false;
+            }
+            
+            // Validate password match
+            if (password !== confirmPassword) {
+                showError('Passwords do not match');
+                return false;
+            }
+            
+            // Show loading state
+            if(btnEl) btnEl.disabled = true;
+            if(btnText) btnText.style.display = 'none';
+            if(spinner) spinner.style.display = 'inline';
+            
+            try {
+                // Use URL-encoded to minimize preflight (helps avoid 405 from strict proxies)
+                const body = new URLSearchParams();
+                for (const [k, v] of formData.entries()) { body.append(k, String(v)); }
+                const res = await fetch(api('/api/signup'), {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body
+                });
+
+                const rawText = await res.text();
+                let data = null;
+                try { data = rawText ? JSON.parse(rawText) : null; } catch (_) { /* non-JSON */ }
+
+                if (res.ok && data && data.ok) {
+                    if(msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#10b981'; }
+                    form.reset();
+                    setTimeout(() => { closeModals(); openLogin(); }, 1500);
+                } else {
+                    const msg = (data && (data.detail || data.message))
+                        ? (Array.isArray(data.detail) ? data.detail.map(d=>d.msg||d).join(', ') : (data.detail || data.message))
+                        : `HTTP ${res.status} ${res.statusText}${rawText ? ` - ${rawText.slice(0,200)}` : ''}`;
+                    showError(msg || 'Signup failed. Please try again.');
+                }
+            } catch (error) {
+                showError('Network error. Please check your connection and try again.');
+            } finally {
+                // Reset button state
+                if(btnEl) btnEl.disabled = false;
+                if(btnText) btnText.style.display = 'inline';
+                if(spinner) spinner.style.display = 'none';
+            }
+            
+            return false;
+        }
+
+        
+
+        
+        
+        function showError(message) {
+            const errEl = document.getElementById('signupErr');
+            if(errEl) {
+                errEl.textContent = message;
+                errEl.style.display = 'block';
+                errEl.style.color = '#ef4444';
+            }
+        }
+        
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = document.getElementById(inputId + '_icon');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                icon.textContent = '👁️';
+            }
+        }
+        function openSignup(){ document.getElementById('modalBackdrop').style.display='block'; document.getElementById('signupModal').style.display='block'; }
+        function openLogin(){ document.getElementById('modalBackdrop').style.display='block'; document.getElementById('loginModal').style.display='block'; }
+        function closeModals(){ document.getElementById('modalBackdrop').style.display='none'; document.getElementById('signupModal').style.display='none'; document.getElementById('loginModal').style.display='none'; }
+        async function getToken(){
+            const user = document.getElementById('userId').value || 'demo';
+            const res = await fetch(api('/auth/token?user_id='+encodeURIComponent(user)), { method: 'POST' });
+            const data = await res.json();
+            document.getElementById('token').textContent = data.token || 'no token';
+            if(data.token){ localStorage.setItem('token', data.token); }
+        }
+
+        // upload section removed per request
+        let stream; let currentDeviceId; let paused=false; let autoTimer=null; let lastFrameTs=0; let trackForTorch=null;
+        async function listDevices(){
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(d=>d.kind==='videoinput');
+            const sel = document.getElementById('deviceSelect');
+            if(!sel){ return cams; }
+            sel.innerHTML = cams.map(d=>`<option value="${d.deviceId}">${d.label||'Camera'}</option>`).join('');
+            return cams;
+        }
+        async function startCam(){
+            const cams = await listDevices();
+            const resSel = document.getElementById('resSelect');
+            let wh = undefined;
+            if(resSel && resSel.value && resSel.value!=='default'){
+                const [w,h]=resSel.value.split('x').map(v=>parseInt(v,10));
+                wh = { width: { ideal: w }, height: { ideal: h } };
+            }
+            const videoConst = Object.assign({}, wh || {}, currentDeviceId ? { deviceId: { exact: currentDeviceId } } : {});
+            const constraints = { video: Object.keys(videoConst).length? videoConst : true, audio: false };
+            if(stream){ stream.getTracks().forEach(t=>t.stop()); }
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            document.getElementById('cam').srcObject = stream;
+            trackForTorch = stream.getVideoTracks()[0] || null;
+            paused=false; document.getElementById('pauseBtn').textContent='Pause';
+            fpsLoop();
+            // auto start detection
+            if(!autoTimer){ toggleAuto(); }
+        }
+        function stopCam(){
+            if(autoTimer){ clearInterval(autoTimer); autoTimer=null; const ab=document.getElementById('autoBtn'); if(ab) ab.textContent='Auto Detect: Off'; }
+            const v=document.getElementById('cam');
+            if(stream){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}; stream=null; }
+            v.srcObject=null; paused=false; document.getElementById('pauseBtn').textContent='Pause';
+            const overlay=document.getElementById('overlay'); if(overlay){ const c=overlay.getContext('2d'); c.clearRect(0,0,overlay.width,overlay.height); }
+        }
+        function switchCam(){
+            const sel = document.getElementById('deviceSelect');
+            currentDeviceId = sel.value; startCam();
+        }
+        function applyResolution(){ startCam(); }
+        function togglePause(){
+            paused=!paused;
+            const v=document.getElementById('cam');
+            if(paused){ v.pause(); } else { v.play(); }
+            document.getElementById('pauseBtn').textContent = paused? 'Resume':'Pause';
+        }
+        async function detectFromCam(){
+            const video = document.getElementById('cam');
+            const canvas = document.getElementById('snap');
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg'));
+            const form = new FormData();
+            form.append('file', blob, 'frame.jpg');
+            form.append('slotsJson', document.getElementById('slotsJson').value || '[]');
+            const res = await fetch(api('/detect'), { method: 'POST', body: form });
+            const data = await res.json();
+            document.getElementById('detectCamOut').textContent = JSON.stringify(data, null, 2);
+            lastResults = data;
+            drawOverlay();
+        }
+        function toggleAuto(){
+            const btn = document.getElementById('autoBtn');
+            if(autoTimer){ clearInterval(autoTimer); autoTimer=null; btn.textContent='Auto Detect: Off'; return; }
+            const ms = Math.max(200, parseInt(document.getElementById('autoMs').value||'1200',10));
+            autoTimer = setInterval(()=>{ if(!paused) detectFromCam(); }, ms);
+            btn.textContent='Auto Detect: On';
+        }
+        function snapshot(){
+            const video=document.getElementById('cam');
+            const cvs=document.createElement('canvas');
+            cvs.width=video.videoWidth||480; cvs.height=video.videoHeight||360;
+            const ctx=cvs.getContext('2d'); ctx.drawImage(video,0,0,cvs.width,cvs.height);
+            cvs.toBlob(b=>{ const url=URL.createObjectURL(b); const a=document.createElement('a'); a.href=url; a.download='snapshot.jpg'; a.click(); URL.revokeObjectURL(url); }, 'image/jpeg');
+        }
+        async function toggleTorch(){
+            try{
+                if(!trackForTorch) return;
+                const caps = trackForTorch.getCapabilities ? trackForTorch.getCapabilities() : {};
+                if(!('torch' in caps)) return; // not supported
+                const settings = trackForTorch.getSettings ? trackForTorch.getSettings() : {};
+                const on = !settings.torch;
+                await trackForTorch.applyConstraints({ advanced: [{ torch: on }] });
+            }catch(e){ /* ignore */ }
+        }
+        function fpsLoop(){
+            const v = document.getElementById('cam');
+            const span = document.getElementById('fps');
+            const now = performance.now();
+            const dt = now - lastFrameTs; lastFrameTs = now;
+            if(dt>0 && dt<1000 && span){ span.textContent = 'FPS: ' + (1000/dt).toFixed(1); }
+            requestAnimationFrame(fpsLoop);
+        }
+
+        // --- Overlay drawing ---
+        let lastResults = [];
+        function parseSlots(){
+            try { return JSON.parse(document.getElementById('slotsJson').value || '[]'); } catch { return []; }
+        }
+        function drawOverlay(){
+            const overlay = document.getElementById('overlay');
+            const ctx = overlay.getContext('2d');
+            const slots = parseSlots();
+            ctx.clearRect(0,0,overlay.width,overlay.height);
+            for(const res of lastResults){
+                const slot = slots.find(s=>s.id===res.slot_id);
+                if(!slot) continue;
+                const pts = slot.polygon;
+                if(!pts || pts.length<3) continue;
+                ctx.beginPath();
+                ctx.moveTo(pts[0][0], pts[0][1]);
+                for(let i=1;i<pts.length;i++){ ctx.lineTo(pts[i][0], pts[i][1]); }
+                ctx.closePath();
+                const occupied = !!res.occupied;
+                ctx.fillStyle = occupied ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)';
+                ctx.strokeStyle = occupied ? 'rgba(239,68,68,0.9)' : 'rgba(34,197,94,0.9)';
+                ctx.lineWidth = 3;
+                ctx.fill();
+                ctx.stroke();
+                // label
+                const cx = pts.reduce((a,p)=>a+p[0],0)/pts.length;
+                const cy = pts.reduce((a,p)=>a+p[1],0)/pts.length;
+                ctx.fillStyle = '#e5e7eb';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText(`${res.slot_id} ${occupied? 'OCC':'FREE'}`, cx-20, cy);
+            }
+        }
+        function drawOverlayFromUpload(results){
+            // Reuse overlay canvas size (assumes polygons match this coordinate space)
+            lastResults = results || [];
+            drawOverlay();
+        }
+
+        // ----- Multi‑camera generic helpers -----
+        const camState = {};
+        async function listDevicesTo(selectId){
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(d=>d.kind==='videoinput');
+            const sel = document.getElementById(selectId);
+            if(sel){ sel.innerHTML = cams.map(d=>`<option value="${d.deviceId}">${d.label||'Camera'}</option>`).join(''); }
+            return cams;
+        }
+        async function startCamFor(prefix){
+            camState[prefix] = camState[prefix] || { deviceId:null, stream:null, timer:null };
+            const sel = document.getElementById(prefix+'_device');
+            await listDevicesTo(prefix+'_device');
+            const deviceId = (sel && sel.value) ? sel.value : undefined;
+            if(camState[prefix].stream){ camState[prefix].stream.getTracks().forEach(t=>t.stop()); camState[prefix].stream=null; }
+            const constraints = deviceId ? { video:{ deviceId:{ exact: deviceId } }, audio:false } : { video:true, audio:false };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            camState[prefix].stream = stream; camState[prefix].deviceId = deviceId || null;
+            document.getElementById(prefix+'_cam').srcObject = stream;
+        }
+        function switchCamFor(prefix){ startCamFor(prefix); }
+        function stopCamFor(prefix){
+            camState[prefix] = camState[prefix] || { stream:null, timer:null };
+            if(camState[prefix].timer){ clearInterval(camState[prefix].timer); camState[prefix].timer=null; }
+            const stream = camState[prefix].stream;
+            if(stream){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+                camState[prefix].stream=null;
+            }
+            const video = document.getElementById(prefix+'_cam');
+            if(video){ video.srcObject = null; }
+            const overlay = document.getElementById(prefix+'_overlay');
+            if(overlay){ const c = overlay.getContext('2d'); c.clearRect(0,0,overlay.width,overlay.height); }
+            const btn = document.getElementById(prefix+'_auto');
+            if(btn){ btn.textContent='Auto Detect: Off'; }
+        }
+        async function detectFromCamFor(prefix){
+            const video = document.getElementById(prefix+'_cam');
+            const canvas = document.getElementById(prefix+'_snap');
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg'));
+            const form = new FormData();
+            form.append('file', blob, 'frame.jpg');
+            form.append('slotsJson', document.getElementById('slotsJson').value || '[]');
+            const res = await fetch(api('/detect'), { method: 'POST', body: form });
+            const data = await res.json();
+            document.getElementById(prefix+'_out').textContent = JSON.stringify(data, null, 2);
+            // draw overlays to specific overlay canvas
+            const overlay = document.getElementById(prefix+'_overlay');
+            const ctx2 = overlay.getContext('2d');
+            const slots = parseSlots();
+            ctx2.clearRect(0,0,overlay.width,overlay.height);
+            for(const resu of data){
+                const slot = slots.find(s=>s.id===resu.slot_id); if(!slot) continue;
+                const pts = slot.polygon; if(!pts || pts.length<3) continue;
+                ctx2.beginPath(); ctx2.moveTo(pts[0][0], pts[0][1]); for(let i=1;i<pts.length;i++){ ctx2.lineTo(pts[i][0], pts[i][1]); } ctx2.closePath();
+                const occupied = !!resu.occupied;
+                ctx2.fillStyle = occupied ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.35)';
+                ctx2.strokeStyle = occupied ? 'rgba(239,68,68,0.9)' : 'rgba(34,197,94,0.9)';
+                ctx2.lineWidth = 3; ctx2.fill(); ctx2.stroke();
+            }
+        }
+        function toggleAutoFor(prefix){
+            camState[prefix] = camState[prefix] || { timer:null };
+            const btn = document.getElementById(prefix+'_auto');
+            if(camState[prefix].timer){ clearInterval(camState[prefix].timer); camState[prefix].timer=null; if(btn) btn.textContent='Auto Detect: Off'; return; }
+            const ms = Math.max(200, parseInt(document.getElementById('autoMs').value||'1200',10));
+            camState[prefix].timer = setInterval(()=> detectFromCamFor(prefix), ms);
+            if(btn) btn.textContent='Auto Detect: On';
+        }
+
+        async function detectFromUrl(){
+            const url = document.getElementById('ipUrl').value.trim();
+            if(!url){ alert('Enter snapshot URL'); return; }
+            const body = new URLSearchParams();
+            body.append('url', url);
+            body.append('slotsJson', document.getElementById('slotsJson').value || '[]');
+            const res = await fetch(api('/detect/url'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+            const data = await res.json();
+            document.getElementById('ipOut').textContent = JSON.stringify(data, null, 2);
+        }
+
+        async function detectFromRtsp(){
+            const rtsp = document.getElementById('rtspPreset').value;
+            const body = new URLSearchParams();
+            body.append('rtsp', rtsp);
+            body.append('slotsJson', document.getElementById('slotsJson').value || '[]');
+            const res = await fetch(api('/detect/rtsp'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+            const data = await res.json();
+            document.getElementById('rtspOut').textContent = JSON.stringify(data, null, 2);
+        }
+
+        // Vehicle type to size mapping
+        const vehicleTypeSizes = {
+            'motorcycle': 0.5,
+            'car': 1.0,
+            'suv': 1.5,
+            'truck': 2.0,
+            'bus': 2.5
+        };
+
+        function updateVehicleSize() {
+            const vehicleType = document.getElementById('vehicleType').value;
+            const size = vehicleTypeSizes[vehicleType];
+            document.getElementById('vehicleSize').value = size;
+        }
+
+        function updateVehicleType() {
+            const size = parseFloat(document.getElementById('vehicleSize').value);
+            const vehicleType = document.getElementById('vehicleType');
+            
+            // Find closest match
+            let closestType = 'car';
+            let closestDiff = Math.abs(vehicleTypeSizes['car'] - size);
+            
+            for (const [type, typeSize] of Object.entries(vehicleTypeSizes)) {
+                const diff = Math.abs(typeSize - size);
+                if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closestType = type;
+                }
+            }
+            
+            vehicleType.value = closestType;
+        }
+
+        function refreshSlotStatus() {
+            const slotsText = document.getElementById('availableSlots').value;
+            const slots = slotsText.split(',').map(s => s.trim()).filter(Boolean);
+            const statusGrid = document.getElementById('slotStatus');
+            
+            statusGrid.innerHTML = '';
+            
+            slots.forEach(slot => {
+                const slotDiv = document.createElement('div');
+                slotDiv.className = 'slot-item';
+                slotDiv.innerHTML = `
+                    <span class="slot-id">${slot}</span>
+                    <span class="slot-indicator available">🟢 Available</span>
+                `;
+                statusGrid.appendChild(slotDiv);
+            });
+        }
+
+        async function assignSlot() {
+            const btn = document.getElementById('assignBtn');
+            const btnText = document.getElementById('assignBtnText');
+            const spinner = document.getElementById('assignSpinner');
+            const resultDiv = document.getElementById('assignResult');
+            const errorDiv = document.getElementById('assignError');
+            
+            // Clear previous results
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            
+            // Show loading state
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline';
+            
+            try {
+                const payload = {
+                    vehicle_size: parseFloat(document.getElementById('vehicleSize').value),
+                    distance_to_gate: parseFloat(document.getElementById('distanceToGate').value),
+                    user_priority: parseFloat(document.getElementById('userPriority').value),
+                    available_slots: document.getElementById('availableSlots').value.split(',').map(s => s.trim()).filter(Boolean),
+                    vehicle_type: document.getElementById('vehicleType').value,
+                    license_plate: document.getElementById('licensePlate').value,
+                    preferred_zone: document.getElementById('preferredZone').value
+                };
+
+                // Client-side validation
+                if (!payload.available_slots || payload.available_slots.length === 0) {
+                    showAssignmentError('Please enter at least one available slot.');
+                    return;
+                }
+                if (Number.isNaN(payload.vehicle_size) || payload.vehicle_size < 0.1 || payload.vehicle_size > 3.0) {
+                    showAssignmentError('Vehicle size must be between 0.1 and 3.0.');
+                    return;
+                }
+                if (Number.isNaN(payload.distance_to_gate) || payload.distance_to_gate < 0 || payload.distance_to_gate > 1000) {
+                    showAssignmentError('Distance to gate must be between 0 and 1000.');
+                    return;
+                }
+                if (Number.isNaN(payload.user_priority) || payload.user_priority < 0 || payload.user_priority > 1) {
+                    showAssignmentError('User priority must be between 0.0 and 1.0.');
+                    return;
+                }
+                const res = await fetch(api('/assign'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                // Read body once and try to parse JSON; if it fails, show raw text
+                const rawText = await res.text();
+                let data = null;
+                try { data = rawText ? JSON.parse(rawText) : null; } catch (e) { /* non-JSON */ }
+
+                if (res.ok && data) {
+                    displayAssignmentResult(data, payload);
+                    addToHistory(data, payload);
+                } else {
+                    const message = (data && (data.detail || data.message))
+                        ? data.detail || data.message
+                        : `HTTP ${res.status} ${res.statusText}${rawText ? ` - ${rawText.slice(0,200)}` : ''}`;
+                    showAssignmentError(message || 'Assignment failed');
+                }
+            } catch (error) {
+                console.error('Assignment request failed:', error);
+                showAssignmentError('Network error. Please check your connection.');
+            } finally {
+                // Reset button state
+                btn.disabled = false;
+                btnText.style.display = 'inline';
+                spinner.style.display = 'none';
+            }
+        }
+
+        function displayAssignmentResult(data, payload) {
+            const resultDiv = document.getElementById('assignResult');
+            
+            if (data.slot_id) {
+                const score = data.score ? (data.score * 100).toFixed(1) : 'N/A';
+                resultDiv.innerHTML = `
+                    <div class="success-message">
+                        <h4>✅ Assignment Successful!</h4>
+                        <div class="assignment-details">
+                            <p><strong>Assigned Slot:</strong> <span class="slot-highlight">${data.slot_id}</span></p>
+                            <p><strong>Confidence Score:</strong> ${score}%</p>
+                            <p><strong>Vehicle:</strong> ${payload.vehicle_type} (Size: ${payload.vehicle_size})</p>
+                            <p><strong>Priority Level:</strong> ${getPriorityLabel(payload.user_priority)}</p>
+                            ${payload.license_plate ? `<p><strong>License Plate:</strong> ${payload.license_plate}</p>` : ''}
+                        </div>
+                        <div class="assignment-actions">
+                            <button onclick="confirmAssignment('${data.slot_id}')" class="btn-primary">Confirm Assignment</button>
+                            <button onclick="findAlternative()" class="btn-secondary">Find Alternative</button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="error-message">
+                        <h4>❌ No Available Slots</h4>
+                        <p>No suitable slots found for your requirements. Try adjusting your preferences or check back later.</p>
+                    </div>
+                `;
+            }
+            
+            resultDiv.style.display = 'block';
+        }
+
+        function showAssignmentError(message) {
+            const errorDiv = document.getElementById('assignError');
+            errorDiv.innerHTML = `<strong>Error:</strong> ${message}`;
+            errorDiv.style.display = 'block';
+        }
+
+        function getPriorityLabel(priority) {
+            const labels = {
+                0.2: '🥉 Standard',
+                0.5: '🥈 Premium', 
+                0.8: '🥇 VIP',
+                1.0: '👑 VIP+'
+            };
+            return labels[priority] || 'Unknown';
+        }
+
+        function confirmAssignment(slotId) {
+            alert(`Assignment confirmed! Your slot ${slotId} is reserved.`);
+            // Here you could add logic to actually reserve the slot
+        }
+
+        function findAlternative() {
+            // Re-run assignment with slightly different parameters
+            assignSlot();
+        }
+
+        function addToHistory(data, payload) {
+            const historyDiv = document.getElementById('assignmentHistory');
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            
+            const timestamp = new Date().toLocaleString();
+            const score = data.score ? (data.score * 100).toFixed(1) : 'N/A';
+            
+            historyItem.innerHTML = `
+                <div class="history-header">
+                    <span class="history-slot">${data.slot_id || 'No slot'}</span>
+                    <span class="history-time">${timestamp}</span>
+                </div>
+                <div class="history-details">
+                    <span>${payload.vehicle_type} • Score: ${score}% • ${getPriorityLabel(payload.user_priority)}</span>
+                </div>
+            `;
+            
+            // Remove "no assignments" message if it exists
+            const noAssignments = historyDiv.querySelector('.muted');
+            if (noAssignments) {
+                noAssignments.remove();
+            }
+            
+            historyDiv.insertBefore(historyItem, historyDiv.firstChild);
+        }
+
+        function clearHistory() {
+            const historyDiv = document.getElementById('assignmentHistory');
+            historyDiv.innerHTML = '<p class="muted">No assignments yet. Create your first assignment above!</p>';
+        }
+
+        // Initialize slot status on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshSlotStatus();
+        });
+        // Footer year inject
+        (function(){ var y=document.getElementById('year'); if(y){ y.textContent = new Date().getFullYear(); } })();
+    </script>
+        <footer class="footer">© <span id="year"></span> AI Parking</footer>
+    </div>
+</body>
+</html>
