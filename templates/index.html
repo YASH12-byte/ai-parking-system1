@@ -375,7 +375,14 @@
             const token = localStorage.getItem('token');
             if(token){
                 const l = document.getElementById('navLogout');
-                if(l){ l.style.display = 'inline'; l.addEventListener('click', ()=>{ localStorage.removeItem('token'); location.href='/'; }); }
+                if(l){ l.style.display = 'inline'; l.addEventListener('click', ()=>{ 
+                    localStorage.removeItem('token'); 
+                    // Show login/signup and hide logout
+                    const login = document.getElementById('navLogin'); if(login) login.style.display='inline';
+                    const signup = document.getElementById('navSignup'); if(signup) signup.style.display='inline';
+                    l.style.display = 'none';
+                    location.href='/'; 
+                }); }
                 const login = document.getElementById('navLogin'); if(login){ login.style.display='none'; }
                 const signup = document.getElementById('navSignup'); if(signup){ signup.style.display='none'; }
             }
@@ -396,7 +403,18 @@
             const res = await fetch(api('/auth/login'), { method: 'POST', headers: { 'Accept':'application/json', 'Content-Type':'application/x-www-form-urlencoded' }, body });
             const data = await res.json();
             document.getElementById('loginOut').textContent = JSON.stringify(data, null, 2);
-            if(data.token){ localStorage.setItem('token', data.token); location.hash = ''; closeModals(); }
+            if(data.token){ 
+                localStorage.setItem('token', data.token); 
+                location.hash = ''; 
+                closeModals();
+                // Show logout and hide login/signup buttons
+                const logout = document.getElementById('navLogout');
+                const login = document.getElementById('navLogin');
+                const signup = document.getElementById('navSignup');
+                if(logout) logout.style.display = 'inline';
+                if(login) login.style.display = 'none';
+                if(signup) signup.style.display = 'none';
+            }
         }
         async function submitReset(e){
             e.preventDefault();

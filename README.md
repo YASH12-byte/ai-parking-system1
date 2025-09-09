@@ -24,6 +24,9 @@ Open `http://localhost:8000`.
 ## Notes
 - Detection uses simple edge-density per-slot heuristic as a placeholder.
 - `src/fuzzy.py` implements a soft-computing score for slot prioritization.
-- `src/crypto_utils.py` provides JWT and AES-GCM helpers.
+- `src/crypto_utils.py` provides JWT and AES-GCM helpers.git add README.md
+git commit -m "Add project README"
+git push
+
 - Configure secrets in environment variables: `SECRET_KEY`.
 
