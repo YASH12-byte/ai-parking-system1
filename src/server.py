@@ -1,16 +1,21 @@
-from typing import List
+from typing import List, Dict, Tuple
+import asyncio
+import json
+import time
 
 import cv2
 import numpy as np
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Column, Integer, String, create_engine, select, text
 from sqlalchemy.orm import DeclarativeBase, Session
 from passlib.context import CryptContext
 import requests
+import io
 
 from .config import settings
 from .crypto_utils import decrypt_text, encrypt_text, generate_jwt, verify_jwt
@@ -21,6 +26,31 @@ from .schemas import AssignmentRequest, AssignmentResponse, DetectionResult, Slo
 app = FastAPI(title="AI Parking System")
 app.mount("/static", StaticFiles(directory=settings.STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=settings.TEMPLATES_DIR)
+import asyncio
+from typing import AsyncGenerator
+
+# In-memory pubsub for SSE (simple; replace with Redis for scale)
+class EventBus:
+    def __init__(self) -> None:
+        self._subscribers: set[asyncio.Queue[str]] = set()
+
+    def subscribe(self) -> asyncio.Queue[str]:
+        q: asyncio.Queue[str] = asyncio.Queue()
+        self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue[str]) -> None:
+        self._subscribers.discard(q)
+
+    async def publish(self, data: str) -> None:
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(data)
+            except Exception:
+                pass
+
+
+event_bus = EventBus()
 
 # CORS (allow browser preflight/OPTIONS for JSON fetches from other origins or ports)
 app.add_middleware(
@@ -30,6 +60,106 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Real-time occupancy state & simple ETA predictions ---
+latest_occupancy_results: List[Dict] = []
+_occupancy_event = asyncio.Event()
+_slot_history: Dict[str, List[Tuple[float, bool]]] = {}
+
+
+def _update_history(results: List[Dict]) -> None:
+    now = time.time()
+    # append latest state per slot
+    for r in results:
+        sid = str(r.get("slot_id"))
+        occ = bool(r.get("occupied"))
+        hist = _slot_history.setdefault(sid, [])
+        hist.append((now, occ))
+        # keep only last 200 points per slot
+        if len(hist) > 200:
+            del hist[: len(hist) - 200]
+
+
+def _compute_eta_minutes(sid: str) -> float | None:
+    # very simple heuristic: if currently occupied, estimate time-to-free as
+    # smoothed average of past occupied run lengths; else None
+    hist = _slot_history.get(sid) or []
+    if not hist:
+        return None
+    # determine current state
+    current_occ = hist[-1][1]
+    if not current_occ:
+        return None
+    # collect durations of past occupied segments
+    segments = []
+    start = None
+    prev = None
+    for ts, occ in hist:
+        if occ and start is None:
+            start = ts
+        if prev is not None and prev and not occ and start is not None:
+            segments.append(ts - start)
+            start = None
+        prev = occ
+    # if still in occupied run, add partial duration
+    if start is not None:
+        segments.append(hist[-1][0] - start)
+    if not segments:
+        return None
+    # exponential smoothing of durations (seconds)
+    alpha = 0.4
+    s = segments[0]
+    for d in segments[1:]:
+        s = alpha * d + (1 - alpha) * s
+    remaining = max(0.0, s - segments[-1])
+    return round(remaining / 60.0, 1) if remaining > 30 else 0.5
+
+
+def _attach_eta(results: List[Dict]) -> Dict[str, float | None]:
+    etas: Dict[str, float | None] = {}
+    for r in results:
+        sid = str(r.get("slot_id"))
+        etas[sid] = _compute_eta_minutes(sid)
+    return etas
+
+
+def _publish_occupancy_full(results: List[Dict]) -> None:
+    global latest_occupancy_results
+    latest_occupancy_results = results or []
+    if not _occupancy_event.is_set():
+        _occupancy_event.set()
+
+
+# --- Security headers (CSP, HSTS, etc.) ---
+import secrets
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    # Generate a per-request nonce for inline scripts
+    csp_nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = csp_nonce
+    response: Response = await call_next(request)
+
+    # Content Security Policy allowing only self and nonce'd inline scripts
+    csp = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{csp_nonce}'; "
+        "img-src 'self' data: blob:; "
+        "style-src 'self' 'unsafe-inline'; "  # allow inline styles from the app CSS
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; frame-ancestors 'none'"
+    )
+    response.headers.setdefault("Content-Security-Policy", csp)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    # HSTS (only meaningful over HTTPS)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+    return response
+
 
 # --- Auth / DB setup ---
 class Base(DeclarativeBase):
@@ -62,18 +192,45 @@ with engine.connect() as conn:
         conn.exec_driver_sql("ALTER TABLE users ADD COLUMN email VARCHAR(256)")
 
 
-def get_current_payload(token: str | None = None):
-    if token is None:
-        raise HTTPException(status_code=401, detail="Missing token")
+def get_current_payload(request: Request):
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token: str | None = None
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    # Also allow token via query for simple testing/dev
+    token = token or request.query_params.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
     try:
         return verify_jwt(token)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=401, detail="Invalid token") from exc
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "csp_nonce": getattr(request.state, "csp_nonce", "")})
+@app.get("/events")
+async def sse_events(request: Request, payload: dict = Depends(get_current_payload)):
+    async def event_stream() -> AsyncGenerator[bytes, None]:
+        queue = event_bus.subscribe()
+        try:
+            # initial comment to open stream
+            yield b":ok\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"data: {data}\n\n".encode("utf-8")
+                except asyncio.TimeoutError:
+                    # keep-alive
+                    yield b":keepalive\n\n"
+        finally:
+            event_bus.unsubscribe(queue)
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
 
 
 @app.get("/login")
@@ -90,7 +247,7 @@ def signup_page():
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 def spa_catch_all(full_path: str, request: Request):
     # Allow other routes above to take precedence; this runs last
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "csp_nonce": getattr(request.state, "csp_nonce", "")})
 
 
 @app.post("/auth/token")
@@ -327,12 +484,12 @@ def reset_health_alias():
 
 
 @app.post("/crypto/encrypt")
-def api_encrypt(text: str, secret: str):
+def api_encrypt(text: str, secret: str, payload: dict = Depends(get_current_payload)):
     return {"ciphertext": encrypt_text(text, secret)}
 
 
 @app.post("/crypto/decrypt")
-def api_decrypt(ciphertext: str, secret: str):
+def api_decrypt(ciphertext: str, secret: str, payload: dict = Depends(get_current_payload)):
     try:
         return {"plaintext": decrypt_text(ciphertext, secret)}
     except Exception as exc:  # noqa: BLE001
@@ -340,7 +497,7 @@ def api_decrypt(ciphertext: str, secret: str):
 
 
 @app.post("/detect", response_model=List[DetectionResult])
-async def detect(file: UploadFile = File(...), slotsJson: str | None = Form(None)):
+async def detect(file: UploadFile = File(...), slotsJson: str | None = Form(None), payload: dict = Depends(get_current_payload)):
     data = await file.read()
     file_bytes = np.frombuffer(data, np.uint8)
     image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
@@ -358,11 +515,18 @@ async def detect(file: UploadFile = File(...), slotsJson: str | None = Form(None
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail="Invalid slotsJson") from exc
 
-    return detect_occupancy(image, slots)
+    results = detect_occupancy(image, slots)
+    # publish summary
+    try:
+        free = [r.slot_id for r in results if not r.occupied]
+        await event_bus.publish(__import__("json").dumps({"type": "occupancy", "free": free}))
+    except Exception:
+        pass
+    return results
 
 
 @app.post("/assign", response_model=AssignmentResponse)
-def assign(req: AssignmentRequest):
+def assign(req: AssignmentRequest, payload: dict = Depends(get_current_payload)):
     if not req.available_slots:
         return AssignmentResponse(slot_id=None, score=None)
 
@@ -379,8 +543,8 @@ def assign_options():
 
 
 @app.post("/assign/", response_model=AssignmentResponse)
-def assign_alias(req: AssignmentRequest):
-    return assign(req)
+def assign_alias(req: AssignmentRequest, payload: dict = Depends(get_current_payload)):
+    return assign(req, payload)
 
 
 @app.options("/assign/")
@@ -400,7 +564,7 @@ def assign_health_get_alias():
 
 # --- RTSP/HTTP camera snapshot proxy (fetch remote frame and run detection) ---
 @app.post("/detect/url", response_model=List[DetectionResult])
-def detect_from_url(url: str, slotsJson: str | None = None):
+def detect_from_url(url: str, slotsJson: str | None = None, payload: dict = Depends(get_current_payload)):
     try:
         resp = requests.get(url, timeout=5)
         resp.raise_for_status()
@@ -415,13 +579,19 @@ def detect_from_url(url: str, slotsJson: str | None = None):
             raw = json.loads(slotsJson)
             for item in raw:
                 slots.append(Slot(**item))
-        return detect_occupancy(image, slots)
+        results = detect_occupancy(image, slots)
+        try:
+            free = [r.slot_id for r in results if not r.occupied]
+            asyncio.create_task(event_bus.publish(__import__("json").dumps({"type": "occupancy", "free": free})))
+        except Exception:
+            pass
+        return results
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="Fetch failed") from exc
 
 
 @app.post("/detect/rtsp", response_model=List[DetectionResult])
-def detect_from_rtsp(rtsp: str, slotsJson: str | None = None):
+def detect_from_rtsp(rtsp: str, slotsJson: str | None = None, payload: dict = Depends(get_current_payload)):
     try:
         cap = cv2.VideoCapture(rtsp)
         if not cap.isOpened():
@@ -437,8 +607,71 @@ def detect_from_rtsp(rtsp: str, slotsJson: str | None = None):
             raw = json.loads(slotsJson)
             for item in raw:
                 slots.append(Slot(**item))
-        return detect_occupancy(frame, slots)
+        results = detect_occupancy(frame, slots)
+        try:
+            free = [r.slot_id for r in results if not r.occupied]
+            asyncio.create_task(event_bus.publish(__import__("json").dumps({"type": "occupancy", "free": free})))
+        except Exception:
+            pass
+        return results
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="RTSP detect failed") from exc
+
+
+# --- QR decode (server fallback for wide browser support) ---
+@app.post("/qr/decode")
+async def qr_decode(file: UploadFile = File(...), payload: dict = Depends(get_current_payload)):
+    try:
+        data = await file.read()
+        file_bytes = np.frombuffer(data, np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if image is None:
+            raise HTTPException(status_code=400, detail="Invalid image")
+        detector = cv2.QRCodeDetector()
+        # detectAndDecodeMulti returns (decoded_texts, points, straight_qrcode)
+        # OpenCV API differs by version; try multi first, then single
+        texts = []
+        try:
+            retval, decoded, points, _ = detector.detectAndDecodeMulti(image)
+            if retval and decoded:
+                texts.extend([t for t in decoded if t])
+        except Exception:  # noqa: BLE001
+            pass
+        if not texts:
+            text = detector.detectAndDecode(image)[0]
+            if text:
+                texts.append(text)
+        return {"ok": True, "results": texts}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"QR decode failed: {exc}") from exc
+
+
+# --- QR generator for public access ---
+@app.get("/qr/generate")
+def qr_generate(request: Request, url: str | None = None, guest: str | None = None, format: str | None = None):
+    try:
+        import qrcode
+        from qrcode.image.svg import SvgImage
+        # Build absolute site URL
+        base = url or settings.PUBLIC_BASE_URL or str(request.base_url)
+        if guest in {"1", "true", "yes"}:
+            base = base.rstrip("/") + "/?guest=1"
+        # Larger box_size for crisper PNG; SVG scales cleanly
+        qr = qrcode.QRCode(border=2, box_size=10)
+        qr.add_data(base)
+        qr.make(fit=True)
+        if (format or "").lower() == "svg":
+            img = qr.make_image(image_factory=SvgImage)
+            svg_bytes = img.to_string()
+            return Response(content=svg_bytes, media_type="image/svg+xml")
+        else:
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return Response(content=buf.getvalue(), media_type="image/png")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"QR generation failed: {exc}") from exc

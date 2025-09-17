@@ -29,6 +29,33 @@
                 </div>
             </div>
         </section>
+        <section id="driver">
+            <h2>📱 Driver Scan (Phone)</h2>
+            <div class="card">
+                <p class="muted">Use your phone to quickly scan and find free parking slots.</p>
+                <div class="cam-wrap">
+                    <video id="driver_cam" autoplay playsinline width="360" height="270" style="background:#000"></video>
+                    <canvas id="driver_snap" width="360" height="270" style="display:none"></canvas>
+                </div>
+                <div class="controls">
+                    <button onclick="startDriverCam()" id="driver_start">Start Camera</button>
+                    <button onclick="stopDriverCam()" id="driver_stop">Stop</button>
+                    <button onclick="ensureToken().then(scanFreeSlotsPhone)" class="btn-primary">Scan Free Slots</button>
+                    <button onclick="ensureToken(true)" class="btn-secondary">Get Guest Token</button>
+                    <button onclick="startQrScan()" class="btn-secondary" id="qrBtn">Scan QR</button>
+                </div>
+                <div id="driverFreeSlots" class="card" style="margin-top:8px; display:none">
+                    <h3>Free Slots (Phone Scan)</h3>
+                    <div id="driverFreeList" class="history-list"></div>
+                </div>
+                <div id="qrOverlay" style="display:none; position:relative; margin-top:8px;">
+                    <div style="position:absolute; top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center;">
+                        <div style="width:220px; height:220px; border:3px solid #22c55e; box-shadow:0 0 0 9999px rgba(0,0,0,0.5);"></div>
+                    </div>
+                    <div style="position:absolute; top:12px; left:12px; right:12px; color:#e5e7eb; text-align:center;">Point camera at QR code…</div>
+                </div>
+            </div>
+        </section>
         
         <section class="features grid">
             <div class="card"><h3>AI Detection</h3><p>Edge‑based slot occupancy estimation.</p></div>
@@ -198,7 +225,9 @@
                 <label>Interval(ms) <input id="autoMs" type="number" value="1200" min="200" step="100" style="width:90px"></label>
                 <button onclick="snapshot()">Snapshot</button>
                 <button onclick="toggleTorch()" id="torchBtn">Torch</button>
+                <button onclick="quickScan()" id="quickScanBtn">Quick Scan Free Slots</button>
                 <span id="fps" class="muted">FPS: -</span>
+                <span id="liveFree" class="muted" style="margin-left:12px">Free: -</span>
             </div>
             <div>
                 <label>Slots JSON
@@ -206,6 +235,10 @@
                 </label>
             </div>
             <pre id="detectCamOut"></pre>
+            <div id="freeSlotsCard" class="card" style="margin-top:12px; display:none;">
+                <h3>Free Slots</h3>
+                <div id="freeSlotsList" class="history-list"></div>
+            </div>
         </section>
 
         <section id="multiCam">
@@ -280,6 +313,31 @@
                     <button onclick="detectFromRtsp()">Connect & Detect</button>
                 </div>
                 <pre id="rtspOut" class="muted"></pre>
+            </div>
+        </section>
+        <section id="entranceQR">
+            <h2>🏁 Entrance QR</h2>
+            <div class="card">
+                <p class="muted">Print and place this at the entrance. Scanning opens this site.</p>
+                <div class="grid" style="gap:12px; align-items:center;">
+                    <div>
+                        <img id="entranceQr" alt="Entrance QR" src="/qr/generate?guest=1" style="width:220px; height:220px; background:#fff; padding:8px; border-radius:8px; box-shadow:0 0 0 1px #111827 inset" />
+                        <div style="margin-top:8px">
+                            <a id="entranceQrDl" href="/qr/generate?guest=1" download="parking-entrance-qr.png">Download PNG</a>
+                            <span class="muted"> | </span>
+                            <a id="entranceQrDlSvg" href="/qr/generate?guest=1&format=svg" download="parking-entrance-qr.svg">Download SVG</a>
+                        </div>
+                        <div id="qrError" class="error-message" style="display:none; margin-top:6px;"></div>
+                    </div>
+                    <div>
+                        <h4>Target URL</h4>
+                        <div>
+                            <a id="siteUrlLink" href="#" target="_blank" rel="noopener" style="text-decoration:underline"></a>
+                        </div>
+                        <code id="siteUrlText" style="display:inline-block; padding:6px 8px; background:#111827; color:#e5e7eb; border-radius:6px; margin-top:6px;"></code>
+                        <p class="muted" style="margin-top:6px;">This is the URL encoded inside the QR.</p>
+                    </div>
+                </div>
             </div>
         </section>
         <section id="assignSlot">
@@ -369,7 +427,7 @@
                 <button onclick="clearHistory()" class="btn-secondary" style="margin-top: 8px;">Clear History</button>
             </div>
         </section>
-    <script>
+    <script nonce="{{ csp_nonce | default('') }}">
         // Auth state for nav
         (function(){
             const token = localStorage.getItem('token');
@@ -606,7 +664,7 @@
             const form = new FormData();
             form.append('file', blob, 'frame.jpg');
             form.append('slotsJson', document.getElementById('slotsJson').value || '[]');
-            const res = await fetch(api('/detect'), { method: 'POST', body: form });
+            const res = await fetch(api('/detect'), { method: 'POST', headers: authHeaders(), body: form });
             const data = await res.json();
             document.getElementById('detectCamOut').textContent = JSON.stringify(data, null, 2);
             lastResults = data;
@@ -643,6 +701,35 @@
             const dt = now - lastFrameTs; lastFrameTs = now;
             if(dt>0 && dt<1000 && span){ span.textContent = 'FPS: ' + (1000/dt).toFixed(1); }
             requestAnimationFrame(fpsLoop);
+        }
+
+        // ---- Driver phone scan helpers ----
+        let driverStream = null;
+        async function startDriverCam(){
+            try{
+                if(driverStream){ stopDriverCam(); }
+                const constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
+                driverStream = await navigator.mediaDevices.getUserMedia(constraints);
+                const v = document.getElementById('driver_cam');
+                v.srcObject = driverStream;
+            }catch(e){ alert('Unable to access camera: ' + (e && e.message ? e.message : e)); }
+        }
+        function stopDriverCam(){
+            const v = document.getElementById('driver_cam');
+            if(driverStream){ try{ driverStream.getTracks().forEach(t=>t.stop()); }catch(_){}
+                driverStream = null; }
+            if(v){ v.srcObject = null; }
+        }
+        
+        
+        async function ensureToken(force){
+            const t = localStorage.getItem('token');
+            if(t && !force){ return t; }
+            const uid = 'guest-' + Math.random().toString(36).slice(2,8);
+            const res = await fetch(api('/auth/token?user_id='+encodeURIComponent(uid)), { method: 'POST' });
+            const data = await res.json();
+            if(data && data.token){ localStorage.setItem('token', data.token); return data.token; }
+            throw new Error('Failed to get guest token');
         }
 
         // --- Overlay drawing ---
@@ -682,6 +769,32 @@
             // Reuse overlay canvas size (assumes polygons match this coordinate space)
             lastResults = results || [];
             drawOverlay();
+        }
+
+        async function quickScan(){
+            try{
+                const btn = document.getElementById('quickScanBtn'); if(btn){ btn.disabled = true; }
+                await detectFromCam();
+                const slots = parseSlots();
+                const free = (lastResults||[]).filter(r => !r.occupied).map(r => r.slot_id);
+                const uniqueFree = Array.from(new Set(free)).filter(Boolean);
+                renderFreeSlots(uniqueFree, slots);
+            } finally {
+                const btn = document.getElementById('quickScanBtn'); if(btn){ btn.disabled = false; }
+            }
+        }
+
+        function renderFreeSlots(freeIds, slots){
+            const card = document.getElementById('freeSlotsCard');
+            const list = document.getElementById('freeSlotsList');
+            if(!card || !list){ return; }
+            card.style.display = 'block';
+            if(!freeIds.length){
+                list.innerHTML = '<p class="muted">No free slots detected right now.</p>';
+                return;
+            }
+            const items = freeIds.map(id => `<div class="history-item"><div class="history-header"><span class="history-slot">${id}</span><span class="history-time">FREE</span></div></div>`);
+            list.innerHTML = items.join('');
         }
 
         // ----- Multi‑camera generic helpers -----
@@ -728,7 +841,7 @@
             const form = new FormData();
             form.append('file', blob, 'frame.jpg');
             form.append('slotsJson', document.getElementById('slotsJson').value || '[]');
-            const res = await fetch(api('/detect'), { method: 'POST', body: form });
+            const res = await fetch(api('/detect'), { method: 'POST', headers: authHeaders(), body: form });
             const data = await res.json();
             document.getElementById(prefix+'_out').textContent = JSON.stringify(data, null, 2);
             // draw overlays to specific overlay canvas
@@ -761,7 +874,7 @@
             const body = new URLSearchParams();
             body.append('url', url);
             body.append('slotsJson', document.getElementById('slotsJson').value || '[]');
-            const res = await fetch(api('/detect/url'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+            const res = await fetch(api('/detect/url'), { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/x-www-form-urlencoded' }, authHeaders()), body });
             const data = await res.json();
             document.getElementById('ipOut').textContent = JSON.stringify(data, null, 2);
         }
@@ -771,7 +884,7 @@
             const body = new URLSearchParams();
             body.append('rtsp', rtsp);
             body.append('slotsJson', document.getElementById('slotsJson').value || '[]');
-            const res = await fetch(api('/detect/rtsp'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+            const res = await fetch(api('/detect/rtsp'), { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/x-www-form-urlencoded' }, authHeaders()), body });
             const data = await res.json();
             document.getElementById('rtspOut').textContent = JSON.stringify(data, null, 2);
         }
@@ -874,7 +987,7 @@
                 }
                 const res = await fetch(api('/assign'), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    headers: Object.assign({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, authHeaders()),
                     body: JSON.stringify(payload)
                 });
 
@@ -998,8 +1111,87 @@
         document.addEventListener('DOMContentLoaded', function() {
             refreshSlotStatus();
         });
+        function authHeaders(){
+            const t = localStorage.getItem('token');
+            return t ? { 'Authorization': 'Bearer ' + t } : {};
+        }
+        // Live free-slots indicator via SSE
+        (function(){
+            try{
+                const token = localStorage.getItem('token');
+                if(!token) return; // only when authenticated
+                const es = new EventSource('/events?token=' + encodeURIComponent(token));
+                es.onmessage = function(ev){
+                    try{
+                        const data = ev.data ? JSON.parse(ev.data) : null;
+                        if(data && data.type === 'occupancy'){
+                            const el = document.getElementById('liveFree');
+                            if(el){ el.textContent = 'Free: ' + (Array.isArray(data.free) ? data.free.length : '-'); }
+                        }
+                    }catch(_){}
+                };
+                es.onerror = function(){ /* ignore transient errors */ };
+            }catch(_){}
+        })();
         // Footer year inject
         (function(){ var y=document.getElementById('year'); if(y){ y.textContent = new Date().getFullYear(); } })();
+        // Set QR to absolute site URL and show text; auto guest token if flag
+        (function(){
+            try{
+                // Prefer server-provided public base via env if available, fallback to origin
+                const hinted = (window.PUBLIC_BASE_URL && typeof window.PUBLIC_BASE_URL==='string' && window.PUBLIC_BASE_URL.trim()) ? window.PUBLIC_BASE_URL.trim() : '';
+                const base = (hinted || window.location.origin + '/').replace(/\/+$/, '/')
+                const target = base + '?guest=1';
+                const img = document.getElementById('entranceQr');
+                const a = document.getElementById('entranceQrDl');
+                const aSvg = document.getElementById('entranceQrDlSvg');
+                const ts = Date.now().toString();
+                const pngUrl = '/qr/generate?guest=1&url=' + encodeURIComponent(base) + '&ts=' + ts;
+                const svgUrl = '/qr/generate?guest=1&format=svg&url=' + encodeURIComponent(base) + '&ts=' + ts;
+                if(img){ loadEntranceQr(img, pngUrl, svgUrl); }
+                if(a){ a.href = pngUrl; }
+                if(aSvg){ aSvg.href = svgUrl; }
+                const txt = document.getElementById('siteUrlText');
+                const link = document.getElementById('siteUrlLink');
+                if(txt){ txt.textContent = target; }
+                if(link){ link.href = target; link.textContent = target; }
+                const params = new URLSearchParams(location.search);
+                if(params.get('guest') === '1'){
+                    ensureToken().catch(()=>{});
+                }
+            }catch(_){}
+        })();
+
+        async function loadEntranceQr(imgEl, pngUrl, svgUrl){
+            const err = document.getElementById('qrError');
+            function showErr(msg){ if(err){ err.textContent = msg; err.style.display = 'block'; } }
+            try{
+                // Try PNG via fetch → blob URL
+                const r = await fetch(pngUrl, { cache: 'no-store' });
+                if(!r.ok){ throw new Error('PNG HTTP ' + r.status); }
+                const b = await r.blob();
+                if(!b || !b.size){ throw new Error('Empty PNG'); }
+                const url = URL.createObjectURL(b);
+                imgEl.onload = () => { try{ URL.revokeObjectURL(url); }catch(_){} };
+                imgEl.src = url;
+                if(err){ err.style.display = 'none'; err.textContent = ''; }
+                return;
+            }catch(_){ /* fallback to SVG */ }
+            try{
+                const r2 = await fetch(svgUrl, { cache: 'no-store' });
+                if(!r2.ok){ throw new Error('SVG HTTP ' + r2.status); }
+                const text = await r2.text();
+                if(!text || text.indexOf('<svg') === -1){ throw new Error('Invalid SVG'); }
+                const blob = new Blob([text], { type: 'image/svg+xml' });
+                const url2 = URL.createObjectURL(blob);
+                imgEl.onload = () => { try{ URL.revokeObjectURL(url2); }catch(_){} };
+                imgEl.src = url2;
+                if(err){ err.style.display = 'none'; err.textContent = ''; }
+                return;
+            }catch(e){
+                showErr('QR failed to load. Click Target URL below instead.');
+            }
+        }
     </script>
         <footer class="footer">© <span id="year"></span> AI Parking</footer>
     </div>

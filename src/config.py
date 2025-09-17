@@ -7,6 +7,7 @@ class Settings:
     MODEL_PATH: str = os.getenv("MODEL_PATH", "models/slot_model.onnx")
     STATIC_DIR: str = os.getenv("STATIC_DIR", "static")
     TEMPLATES_DIR: str = os.getenv("TEMPLATES_DIR", "templates")
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "")
 
 
 settings = Settings()
