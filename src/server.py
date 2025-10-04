@@ -20,6 +20,7 @@ import io
 from .config import settings
 from .crypto_utils import decrypt_text, encrypt_text, generate_jwt, verify_jwt
 from .detector import detect_occupancy
+from .classifier import detect_with_model
 from .fuzzy import compute_slot_score
 from .schemas import AssignmentRequest, AssignmentResponse, DetectionResult, Slot
 
@@ -141,10 +142,12 @@ async def security_headers_middleware(request: Request, call_next):
     request.state.csp_nonce = csp_nonce
     response: Response = await call_next(request)
 
-    # Content Security Policy allowing only self and nonce'd inline scripts
+    # Content Security Policy: allow scripts from self and nonce; include 'unsafe-inline' for
+    # development so inline event handlers (onclick) used in the templates work. In production
+    # consider removing 'unsafe-inline' and moving all script logic into external files with the nonce.
     csp = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{csp_nonce}'; "
+        f"script-src 'self' 'nonce-{csp_nonce}' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "style-src 'self' 'unsafe-inline'; "  # allow inline styles from the app CSS
         "font-src 'self' data:; "
@@ -155,7 +158,9 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    # Allow camera/microphone/geolocation access (useful for local/dev testing).
+    # In production you should tighten this policy to only allow trusted origins.
+    response.headers.setdefault("Permissions-Policy", "camera=*, microphone=*, geolocation=*")
     # HSTS (only meaningful over HTTPS)
     response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
     return response
@@ -515,7 +520,9 @@ async def detect(file: UploadFile = File(...), slotsJson: str | None = Form(None
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail="Invalid slotsJson") from exc
 
-    results = detect_occupancy(image, slots)
+    # prefer model-based detection when a trained model exists; otherwise fall back to heuristic
+    model_results = detect_with_model(image, slots)
+    results = model_results if model_results is not None else detect_occupancy(image, slots)
     # publish summary
     try:
         free = [r.slot_id for r in results if not r.occupied]
@@ -579,7 +586,9 @@ def detect_from_url(url: str, slotsJson: str | None = None, payload: dict = Depe
             raw = json.loads(slotsJson)
             for item in raw:
                 slots.append(Slot(**item))
-        results = detect_occupancy(image, slots)
+
+        model_results = detect_with_model(image, slots)
+        results = model_results if model_results is not None else detect_occupancy(image, slots)
         try:
             free = [r.slot_id for r in results if not r.occupied]
             asyncio.create_task(event_bus.publish(__import__("json").dumps({"type": "occupancy", "free": free})))
@@ -607,7 +616,9 @@ def detect_from_rtsp(rtsp: str, slotsJson: str | None = None, payload: dict = De
             raw = json.loads(slotsJson)
             for item in raw:
                 slots.append(Slot(**item))
-        results = detect_occupancy(frame, slots)
+
+        model_results = detect_with_model(frame, slots)
+        results = model_results if model_results is not None else detect_occupancy(frame, slots)
         try:
             free = [r.slot_id for r in results if not r.occupied]
             asyncio.create_task(event_bus.publish(__import__("json").dumps({"type": "occupancy", "free": free})))
