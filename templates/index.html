@@ -619,23 +619,47 @@
             return cams;
         }
         async function startCam(){
-            const cams = await listDevices();
-            const resSel = document.getElementById('resSelect');
-            let wh = undefined;
-            if(resSel && resSel.value && resSel.value!=='default'){
-                const [w,h]=resSel.value.split('x').map(v=>parseInt(v,10));
-                wh = { width: { ideal: w }, height: { ideal: h } };
+            console.log("startCam: function called");
+            try {
+                console.log("startCam: 1. Listing devices...");
+                const cams = await listDevices();
+                console.log(`startCam: 2. Found ${cams.length} video devices.`);
+                
+                const resSel = document.getElementById('resSelect');
+                let wh = undefined;
+                if(resSel && resSel.value && resSel.value!=='default'){
+                    const [w,h]=resSel.value.split('x').map(v=>parseInt(v,10));
+                    wh = { width: { ideal: w }, height: { ideal: h } };
+                    console.log("startCam: 3. Resolution selected:", wh);
+                } else {
+                    console.log("startCam: 3. Using default resolution.");
+                }
+
+                const videoConst = Object.assign({}, wh || {}, currentDeviceId ? { deviceId: { exact: currentDeviceId } } : {});
+                const constraints = { video: Object.keys(videoConst).length? videoConst : true, audio: false };
+                console.log("startCam: 4. Media constraints:", JSON.stringify(constraints, null, 2));
+
+                if(stream){ 
+                    console.log("startCam: 5. Stopping existing stream.");
+                    stream.getTracks().forEach(t=>t.stop()); 
+                }
+
+                console.log("startCam: 6. Requesting new media stream (getUserMedia)...");
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log("startCam: 7. Got stream successfully!");
+
+                document.getElementById('cam').srcObject = stream;
+                trackForTorch = stream.getVideoTracks()[0] || null;
+                paused=false; document.getElementById('pauseBtn').textContent='Pause';
+                
+                console.log("startCam: 8. Starting FPS loop and auto-detection.");
+                fpsLoop();
+                if(!autoTimer){ toggleAuto(); }
+                console.log("startCam: 9. Camera setup complete.");
+            } catch (e) {
+                console.error("startCam: CRITICAL ERROR -", e);
+                alert('Could not start camera. Please grant camera permission and check if another app is using it.\\n\\nError: ' + (e.message || e));
             }
-            const videoConst = Object.assign({}, wh || {}, currentDeviceId ? { deviceId: { exact: currentDeviceId } } : {});
-            const constraints = { video: Object.keys(videoConst).length? videoConst : true, audio: false };
-            if(stream){ stream.getTracks().forEach(t=>t.stop()); }
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            document.getElementById('cam').srcObject = stream;
-            trackForTorch = stream.getVideoTracks()[0] || null;
-            paused=false; document.getElementById('pauseBtn').textContent='Pause';
-            fpsLoop();
-            // auto start detection
-            if(!autoTimer){ toggleAuto(); }
         }
         function stopCam(){
             if(autoTimer){ clearInterval(autoTimer); autoTimer=null; const ab=document.getElementById('autoBtn'); if(ab) ab.textContent='Auto Detect: Off'; }
@@ -712,7 +736,7 @@
                 driverStream = await navigator.mediaDevices.getUserMedia(constraints);
                 const v = document.getElementById('driver_cam');
                 v.srcObject = driverStream;
-            }catch(e){ alert('Unable to access camera: ' + (e && e.message ? e.message : e)); }
+            }catch(e){ alert('Could not start phone camera. Please grant camera permission.\n\nError: ' + (e && e.message ? e.message : e)); }
         }
         function stopDriverCam(){
             const v = document.getElementById('driver_cam');
@@ -1021,22 +1045,44 @@
             
             if (data.slot_id) {
                 const score = data.score ? (data.score * 100).toFixed(1) : 'N/A';
-                resultDiv.innerHTML = `
-                    <div class="success-message">
-                        <h4>✅ Assignment Successful!</h4>
-                        <div class="assignment-details">
-                            <p><strong>Assigned Slot:</strong> <span class="slot-highlight">${data.slot_id}</span></p>
-                            <p><strong>Confidence Score:</strong> ${score}%</p>
-                            <p><strong>Vehicle:</strong> ${payload.vehicle_type} (Size: ${payload.vehicle_size})</p>
-                            <p><strong>Priority Level:</strong> ${getPriorityLabel(payload.user_priority)}</p>
-                            ${payload.license_plate ? `<p><strong>License Plate:</strong> ${payload.license_plate}</p>` : ''}
-                        </div>
-                        <div class="assignment-actions">
-                            <button onclick="confirmAssignment('${data.slot_id}')" class="btn-primary">Confirm Assignment</button>
-                            <button onclick="findAlternative()" class="btn-secondary">Find Alternative</button>
-                        </div>
-                    </div>
+                // Build the success message using DOM APIs so we don't rely on inline event handlers
+                const container = document.createElement('div');
+                container.className = 'success-message';
+
+                const title = document.createElement('h4');
+                title.textContent = '✅ Assignment Successful!';
+                container.appendChild(title);
+
+                const details = document.createElement('div');
+                details.className = 'assignment-details';
+                details.innerHTML = `
+                    <p><strong>Assigned Slot:</strong> <span class="slot-highlight">${data.slot_id}</span></p>
+                    <p><strong>Confidence Score:</strong> ${score}%</p>
+                    <p><strong>Vehicle:</strong> ${payload.vehicle_type} (Size: ${payload.vehicle_size})</p>
+                    <p><strong>Priority Level:</strong> ${getPriorityLabel(payload.user_priority)}</p>
+                    ${payload.license_plate ? `<p><strong>License Plate:</strong> ${payload.license_plate}</p>` : ''}
                 `;
+                container.appendChild(details);
+
+                const actions = document.createElement('div');
+                actions.className = 'assignment-actions';
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.className = 'btn-primary';
+                confirmBtn.textContent = 'Confirm Assignment';
+                confirmBtn.addEventListener('click', function(){ confirmAssignment(data.slot_id); });
+
+                const altBtn = document.createElement('button');
+                altBtn.className = 'btn-secondary';
+                altBtn.textContent = 'Find Alternative';
+                altBtn.addEventListener('click', findAlternative);
+
+                actions.appendChild(confirmBtn);
+                actions.appendChild(altBtn);
+                container.appendChild(actions);
+
+                resultDiv.innerHTML = '';
+                resultDiv.appendChild(container);
             } else {
                 resultDiv.innerHTML = `
                     <div class="error-message">
